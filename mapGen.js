@@ -136,9 +136,10 @@ async function drawIcons(canvas, plane, tiledata, tileinfo) {
                 icons[tiledata[EL].tilebase].src = `https://github.com/Argavyon/NC-jsMap/raw/main/icons/tiles/${tiledata[EL].tilebase}.gif`;
             }
             try {
-                await icons[tiledata[EL].tilebase].decode();
-                if (window.cur_plane != plane.id) return;
-                drawIcon(x, y, icons[tiledata[EL].tilebase]);
+                icons[tiledata[EL].tilebase].decode().then(() => {
+                    if (window.cur_plane != plane.id) return;
+                    drawIcon(x, y, icons[tiledata[EL].tilebase]);
+                });
             } catch (e) {
                 if (e instanceof DOMException) {
                     console.log(`No tile icon found for "${tiledata[EL].tilebase}"`);
