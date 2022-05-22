@@ -1,5 +1,7 @@
 'use strict';
 
+const icons = {};
+
 class TightPriorityQueue {
     constructor() {
         this.pList = [];
@@ -47,7 +49,7 @@ function DownloadCanvasAsImage(canvas) {
     downloadLink.remove();
 }
 
-function drawMap(canvas, plane, tiledata) {
+function drawMap(canvas, plane, tiledata, tileinfo) {
     const drawCtx = canvas.getContext('2d');
     const colorBG = 'dimgray';
     const x0 = plane.x_offset;
@@ -66,12 +68,14 @@ function drawMap(canvas, plane, tiledata) {
     drawCtx.fillStyle = "#000000";
     drawCtx.fillRect(0, 0, canvas.width, canvas.height);
     
+    // Draw background
     for (let x = 1 + x0; x <= plane.columns + x0; x++) {
         for (let y = 1 + y0; y <= plane.rows + y0; y++) {
             drawTile(x, y, colorBG);
         }
     }
     
+    // Draw Border Coordinates
     drawCtx.font = "18px monospace";
     drawCtx.fillStyle = "white";
     drawCtx.textAlign = "center";
@@ -85,6 +89,7 @@ function drawMap(canvas, plane, tiledata) {
         drawCtx.fillText(y, canvas.width - 11, (y-y0)*24 + 13);
     }
     
+    // Draw tiles
     for (let x = 1 + x0; x <= plane.columns + x0; x++) {
         for (let y = 1 + y0; y <= plane.rows + y0; y++) {
             const EL = encodeLocation(x, y);
@@ -93,6 +98,46 @@ function drawMap(canvas, plane, tiledata) {
         }
     }
     
+}
+
+async function drawPortals(canvas, plane, portals, tileinfo) {
+    const drawCtx = canvas.getContext('2d');
+    if (!icons.portal) {
+        icons.portal = new Image();
+        icons.portal.src = 'https://github.com/Argavyon/NC-jsMap/raw/main/icons/modifiers/portal.gif';
+        await icons.portal.decode();
+    }
+    
+    const drawPortal = (x,y, x0,y0) => {
+        // APPROACH 1
+        // drawCtx.drawImage(icons.portal, 0, 13, 46, 46, (x-x0)*24, (y-y0)*24, 23, 23);
+        
+        // APPROACH 2
+        drawCtx.beginPath();
+        
+        drawCtx.rect((x-x0)*24+1, (y-y0)*24+1, 21, 21);
+        drawCtx.strokeStyle = 'blue';
+        drawCtx.lineWidth = 2;
+        drawCtx.stroke();
+        
+        drawCtx.closePath();
+    };
+    
+    for (const portal of portals) {
+        const [x0, y0] = [plane.x_offset, plane.y_offset];
+        if (portal.from.plane === plane.name) {
+            const [x, y] = [portal.from.x, portal.from.y];
+            drawPortal(x,y, x0,y0);
+            if (!tileinfo[`${x}_${y}`]) tileinfo[`${x}_${y}`] = [];
+            tileinfo[`${x}_${y}`].push({type: 'portal', to: portal.to, from: portal.from})
+        }
+        if (portal.bidirectional && portal.to.plane === plane.name) {
+            const [x, y] = [portal.to.x, portal.to.y];
+            drawPortal(x,y, x0,y0);
+            if (!tileinfo[`${x}_${y}`]) tileinfo[`${x}_${y}`] = [];
+            tileinfo[`${x}_${y}`].push({type: 'portal', to: portal.from, from: portal.to});
+        }
+    }
 }
 
 async function getMapDataURL(tiledata, planeID) {
@@ -119,14 +164,18 @@ function main() {
         '402': {'name': 'Elysium',      'id':402, 'rows': 20, 'columns': 20, 'x':527,  'x_offset':0,  'y':527,  'y_offset':0}
 	};
     
-    const tiledata = {};
+    window.tiledata = {};
+    window.tileinfo = [];
+    window.cur_plane = null;
     document.querySelectorAll('li.nav-item button').forEach(btn => {
-        window.cur_plane = null;
 		btn.onclick = async function() {
             window.cur_plane = this.value;
-            drawMap(canvas, planes[window.cur_plane], tiledata);
+            window.tileinfo = {};
+            window.tiledata = {};
+            drawMap(canvas, planes[window.cur_plane], tiledata, tileinfo);
             await getMapDataURL(tiledata, window.cur_plane);
-            drawMap(canvas, planes[window.cur_plane], tiledata);
+            drawMap(canvas, planes[window.cur_plane], tiledata, tileinfo);
+            drawPortals(canvas, planes[window.cur_plane], portals, tileinfo);
         };
         
         // console.log(tiledata);
@@ -141,18 +190,32 @@ function main() {
             // console.log(loc);
             
             if (tiledata[loc]) {
+                tooltip.innerHTML = '';
                 tooltip.style.left = `${Math.floor(e.pageX) + 12}px`;
                 tooltip.style.top = `${Math.floor(e.pageY - toolHalfHeight) - 12}px`;
                 tooltip.style.display = 'block';
+                
                 const tile = tiledata[loc];
                 const article = (word) => ['a', 'e', 'i', 'o', 'u'].includes(word[0].toLowerCase()) ? 'an' : 'a';
-                tooltip.textContent = `(${X}, ${Y}) ${tile.tilename}, ${article(tile.tilebase)} ${tile.tilebase}`;
+                const descDiv = tooltip.appendChild(document.createElement('div'));
+                descDiv.textContent = `(${X}, ${Y}) ${tile.tilename}, ${article(tile.tilebase)} ${tile.tilebase}`;
+                
+                if (tileinfo[`${X}_${Y}`]) {
+                    for (const info of tileinfo[`${X}_${Y}`]) {
+                        const infoDiv = tooltip.appendChild(document.createElement('div'));
+                        switch (info.type) {
+                        case 'portal':
+                            infoDiv.textContent = `Portal (${info.from.side}) to ${info.to.plane} ${info.to.x},${info.to.y} (${info.to.side}).`;
+                            break;
+                        }
+                    }
+                }
             } else { tooltip.style.display = 'none'; }
         }
-        
         
         // DownloadCanvasAsImage(canvas);
 	});
     document.querySelector('li.nav-item button').click();
 }
+
 main();
