@@ -113,7 +113,7 @@ function drawMap(canvas, plane, tiledata, tileinfo) {
     }
 }
 
-async function drawIcons(canvas, plane, tiledata, tileinfo) {
+function drawIcons(canvas, plane, tiledata, tileinfo) {
     const drawCtx = canvas.getContext('2d');
     const colorBG = 'dimgray';
     const x0 = plane.x_offset;
@@ -126,6 +126,7 @@ async function drawIcons(canvas, plane, tiledata, tileinfo) {
     };
     
     // Draw icons
+    const drawPromises = [];
     for (let x = 1 + x0; x <= plane.columns + x0; x++) {
         for (let y = 1 + y0; y <= plane.rows + y0; y++) {
             if (window.cur_plane != plane.id) return;
@@ -135,18 +136,22 @@ async function drawIcons(canvas, plane, tiledata, tileinfo) {
                 icons[tiledata[EL].tilebase] = new Image();
                 icons[tiledata[EL].tilebase].src = `https://github.com/Argavyon/NC-jsMap/raw/main/icons/tiles/${tiledata[EL].tilebase}.gif`;
             }
-            try {
-                icons[tiledata[EL].tilebase].decode().then(() => {
+            drawPromises.push(
+                icons[tiledata[EL].tilebase].decode()
+                .then(() => {
                     if (window.cur_plane != plane.id) return;
                     drawIcon(x, y, icons[tiledata[EL].tilebase]);
-                });
-            } catch (e) {
-                if (e instanceof DOMException) {
-                    console.log(`No tile icon found for "${tiledata[EL].tilebase}"`);
-                } else { throw e; }
-            }
+                })
+                .catch(e => {
+                    if (e instanceof DOMException) {
+                        console.log(`No tile icon found for "${tiledata[EL].tilebase}"`);
+                    } else { throw e; }
+                })
+            );
         }
     }
+    
+    return Promise.all(drawPromises);
 }
 
 async function drawPortals(canvas, plane, portals, tileinfo) {
