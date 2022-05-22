@@ -49,7 +49,7 @@ function DownloadCanvasAsImage(canvas) {
     downloadLink.remove();
 }
 
-function drawMap(canvas, plane, tiledata, tileinfo) {
+function drawBaseMap(canvas, plane) {
     const drawCtx = canvas.getContext('2d');
     const colorBG = 'dimgray';
     const x0 = plane.x_offset;
@@ -88,6 +88,20 @@ function drawMap(canvas, plane, tiledata, tileinfo) {
         drawCtx.fillText(y, 11, (y-y0)*24 + 13);
         drawCtx.fillText(y, canvas.width - 11, (y-y0)*24 + 13);
     }
+}
+
+function drawMap(canvas, plane, tiledata, tileinfo) {
+    const drawCtx = canvas.getContext('2d');
+    const colorBG = 'dimgray';
+    const x0 = plane.x_offset;
+    const y0 = plane.y_offset;
+    
+    const encodeLocation = (x, y) => x + y*72 + plane.id*3600;
+    const drawTile = (x, y, color) => {
+        // console.log(x, y, color);
+        drawCtx.fillStyle = color;
+        drawCtx.fillRect((x-x0)*24, (y-y0)*24, 23, 23);
+    };
     
     // Draw tiles
     for (let x = 1 + x0; x <= plane.columns + x0; x++) {
@@ -97,7 +111,40 @@ function drawMap(canvas, plane, tiledata, tileinfo) {
             drawTile(x, y, '#' + tiledata[EL].tilecolor);
         }
     }
+}
+
+async function drawIcons(canvas, plane, tiledata, tileinfo) {
+    const drawCtx = canvas.getContext('2d');
+    const colorBG = 'dimgray';
+    const x0 = plane.x_offset;
+    const y0 = plane.y_offset;
     
+    const encodeLocation = (x, y) => x + y*72 + plane.id*3600;
+    const drawIcon = (x, y, icon) => {
+        // console.log(x, y, icon);
+        drawCtx.drawImage(icon, (x-x0)*24+5, (y-y0)*24, 18, 18);
+    };
+    
+    // Draw icons
+    for (let x = 1 + x0; x <= plane.columns + x0; x++) {
+        for (let y = 1 + y0; y <= plane.rows + y0; y++) {
+            if (window.cur_plane != plane.id) return;
+            const EL = encodeLocation(x, y);
+            if (!tiledata[EL]) continue;
+            if (!icons[tiledata[EL].tilebase]) {
+                icons[tiledata[EL].tilebase] = new Image();
+                icons[tiledata[EL].tilebase].src = `https://github.com/Argavyon/NC-jsMap/raw/main/icons/tiles/${tiledata[EL].tilebase}.gif`;
+            }
+            try {
+                await icons[tiledata[EL].tilebase].decode();
+                drawIcon(x, y, icons[tiledata[EL].tilebase]);
+            } catch (e) {
+                if (e instanceof DOMException) {
+                    console.log(`No tile icon found for "${tiledata[EL].tilebase}"`);
+                } else { throw e; }
+            }
+        }
+    }
 }
 
 async function drawPortals(canvas, plane, portals, tileinfo) {
@@ -172,10 +219,12 @@ function main() {
             window.cur_plane = this.value;
             window.tileinfo = {};
             window.tiledata = {};
-            drawMap(canvas, planes[window.cur_plane], tiledata, tileinfo);
+            drawBaseMap(canvas, planes[window.cur_plane]);
             await getMapDataURL(tiledata, window.cur_plane);
             drawMap(canvas, planes[window.cur_plane], tiledata, tileinfo);
-            drawPortals(canvas, planes[window.cur_plane], portals, tileinfo);
+            await drawPortals(canvas, planes[window.cur_plane], portals, tileinfo);
+            await drawIcons(canvas, planes[window.cur_plane], tiledata, tileinfo);
+            await drawPortals(canvas, planes[window.cur_plane], portals, {});
         };
         
         // console.log(tiledata);
