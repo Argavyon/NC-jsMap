@@ -137,6 +137,7 @@ async function drawIcons(canvas, plane, tiledata, tileinfo) {
             }
             try {
                 await icons[tiledata[EL].tilebase].decode();
+                if (window.cur_plane != plane.id) return;
                 drawIcon(x, y, icons[tiledata[EL].tilebase]);
             } catch (e) {
                 if (e instanceof DOMException) {
