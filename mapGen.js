@@ -113,7 +113,74 @@ function drawMap(canvas, plane, tiledata, tileinfo) {
     }
 }
 
-function drawIcons(canvas, plane, tiledata, tileinfo) {
+const noIconList = [
+    'Biodome Wall',
+    'Cropland',
+    'Airlock',
+    'Lake',
+    'Grassland',
+    'Gravel Parking Lot',
+    'Pond',
+    
+    'Loading Zone',
+    'Solid Rock',
+    
+    'Idyllic Meadow',
+    'River',
+    
+    'Frozen Wastes',
+    'Iron Wastes',
+    'Frozen River',
+    'Blood Waste',
+    
+    'Stoneland',
+    'Dark Ocean',
+    
+    'Sewer Tunnel',
+];
+
+async function loadIcons(planes, tileinfo) {
+    const iconPromises = [];
+    for (const plane of Object.values(planes)) {
+        const x0 = plane.x_offset;
+        const y0 = plane.y_offset;
+        
+        const tiledata = {};
+        try {
+            await getMapDataURL(tiledata, plane.id);
+        } catch (e) {
+            if (e.name === 'Error' && e.message === '526 ') {
+                console.log(`Cloudflare error 526 while retrieving data for ${planes[window.cur_plane].name}.`);
+                continue;
+            } else throw e;
+        }
+        
+        const encodeLocation = (x, y) => x + y*72 + plane.id*3600;
+        
+        for (let x = 1 + x0; x <= plane.columns + x0; x++) {
+            for (let y = 1 + y0; y <= plane.rows + y0; y++) {
+                const EL = encodeLocation(x, y);
+                if (!tiledata[EL]) continue;
+                const base = tiledata[EL].tilebase;
+                if (!icons[base] && !noIconList.includes(base)) {
+                    icons[base] = new Image();
+                    icons[base].src = `https://github.com/Argavyon/NC-jsMap/raw/main/icons/tiles/${base}.gif`;
+                    iconPromises.push(
+                        icons[base].decode()
+                        .catch(e => {
+                            if (e instanceof DOMException) {
+                                console.log(`No tile icon found for "${base}"`);
+                            } else throw e;
+                        })
+                    );
+                }
+            }
+        }
+    }
+    return Promise.all(iconPromises);
+}
+
+async function drawIcons(canvas, plane, tiledata, tileinfo, iconsPromise) {
     const drawCtx = canvas.getContext('2d');
     const colorBG = 'dimgray';
     const x0 = plane.x_offset;
@@ -125,26 +192,24 @@ function drawIcons(canvas, plane, tiledata, tileinfo) {
         drawCtx.drawImage(icon, (x-x0)*24+5, (y-y0)*24, 18, 18);
     };
     
-    // Draw icons
+    await iconsPromise;
     const drawPromises = [];
     for (let x = 1 + x0; x <= plane.columns + x0; x++) {
         for (let y = 1 + y0; y <= plane.rows + y0; y++) {
             if (window.cur_plane != plane.id) return;
             const EL = encodeLocation(x, y);
             if (!tiledata[EL]) continue;
-            if (!icons[tiledata[EL].tilebase]) {
-                icons[tiledata[EL].tilebase] = new Image();
-                icons[tiledata[EL].tilebase].src = `https://github.com/Argavyon/NC-jsMap/raw/main/icons/tiles/${tiledata[EL].tilebase}.gif`;
-            }
+            const base = tiledata[EL].tilebase;
+            if (noIconList.includes(base)) continue;
             drawPromises.push(
-                icons[tiledata[EL].tilebase].decode()
+                icons[base].decode()
                 .then(() => {
                     if (window.cur_plane != plane.id) return;
-                    drawIcon(x, y, icons[tiledata[EL].tilebase]);
+                    drawIcon(x, y, icons[base]);
                 })
                 .catch(e => {
                     if (e instanceof DOMException) {
-                        console.log(`No tile icon found for "${tiledata[EL].tilebase}"`);
+                        console.log(`No tile icon found for "${base}"`);
                     } else throw e;
                 })
             );
@@ -221,6 +286,7 @@ function main() {
     window.tiledata = {};
     window.tileinfo = [];
     window.cur_plane = null;
+    const iconsPromise = loadIcons(planes, tileinfo);
     document.querySelectorAll('li.nav-item button').forEach(btn => {
 		btn.onclick = async function() {
             window.cur_plane = this.value;
@@ -236,7 +302,7 @@ function main() {
             }
             drawMap(canvas, planes[window.cur_plane], tiledata, tileinfo);
             await drawPortals(canvas, planes[window.cur_plane], portals, tileinfo);
-            await drawIcons(canvas, planes[window.cur_plane], tiledata, tileinfo);
+            await drawIcons(canvas, planes[window.cur_plane], tiledata, tileinfo, iconsPromise);
             await drawPortals(canvas, planes[window.cur_plane], portals, {});
         };
         
