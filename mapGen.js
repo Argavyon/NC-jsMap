@@ -145,7 +145,7 @@ function drawIcons(canvas, plane, tiledata, tileinfo) {
                 .catch(e => {
                     if (e instanceof DOMException) {
                         console.log(`No tile icon found for "${tiledata[EL].tilebase}"`);
-                    } else { throw e; }
+                    } else throw e;
                 })
             );
         }
@@ -227,7 +227,13 @@ function main() {
             window.tileinfo = {};
             window.tiledata = {};
             drawBaseMap(canvas, planes[window.cur_plane]);
-            await getMapDataURL(tiledata, window.cur_plane);
+            try {
+                await getMapDataURL(tiledata, window.cur_plane);
+            } catch (e) {
+                if (e.name === 'Error' && e.message === '526 ') {
+                    console.log(`Cloudflare error 526 while retrieving data for ${planes[window.cur_plane].name}.`);
+                } else throw e;
+            }
             drawMap(canvas, planes[window.cur_plane], tiledata, tileinfo);
             await drawPortals(canvas, planes[window.cur_plane], portals, tileinfo);
             await drawIcons(canvas, planes[window.cur_plane], tiledata, tileinfo);
