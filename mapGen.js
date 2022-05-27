@@ -122,7 +122,6 @@ const noIconList = [
     'Gravel Parking Lot',
     'Pond',
     
-    'Loading Zone',
     'Solid Rock',
     
     'Idyllic Meadow',
@@ -139,44 +138,41 @@ const noIconList = [
     'Sewer Tunnel',
 ];
 
-async function loadIcons(planes, tileinfo) {
+async function loadAllIcons(planes) {
     const iconPromises = [];
+    
     for (const plane of Object.values(planes)) {
-        const x0 = plane.x_offset;
-        const y0 = plane.y_offset;
-        
-        const tiledata = {};
-        try {
-            await getMapDataURL(tiledata, plane.id);
-        } catch (e) {
-            if (e.name === 'Error' && e.message === '526 ') {
-                console.log(`Cloudflare error 526 while retrieving data for ${planes[window.cur_plane].name}.`);
-                continue;
-            } else throw e;
-        }
-        
-        const encodeLocation = (x, y) => x + y*72 + plane.id*3600;
-        
-        for (let x = 1 + x0; x <= plane.columns + x0; x++) {
-            for (let y = 1 + y0; y <= plane.rows + y0; y++) {
-                const EL = encodeLocation(x, y);
-                if (!tiledata[EL]) continue;
-                const base = tiledata[EL].tilebase;
-                if (!icons[base] && !noIconList.includes(base)) {
-                    icons[base] = new Image();
-                    icons[base].src = `https://github.com/Argavyon/NC-jsMap/raw/main/icons/tiles/${base}.gif`;
-                    iconPromises.push(
-                        icons[base].decode()
-                        .catch(e => {
-                            if (e instanceof DOMException) {
-                                console.log(`No tile icon found for "${base}"`);
-                            } else throw e;
-                        })
-                    );
-                }
-            }
+        iconPromises.push(
+            getMapDataURL({}, plane.id)
+            .then(TBset => loadTBsetIcons(TBset))
+            .catch(e => {
+                if (e.name === 'Error' && e.message === '526 ') {
+                    console.log(`Cloudflare error 526 while retrieving data for ${planes[plane.id].name}.`);
+                } else throw e;
+            })
+        );
+    }
+    return Promise.all(iconPromises);
+}
+
+async function loadTBsetIcons(TBset) {
+    const iconPromises = [];
+    
+    for (const base of TBset) {
+        if (!icons[base] && !noIconList.includes(base)) {
+            icons[base] = new Image();
+            icons[base].src = `https://github.com/Argavyon/NC-jsMap/raw/main/icons/tiles/${base}.gif`;
+            iconPromises.push(
+                icons[base].decode()
+                .catch(e => {
+                    if (e instanceof DOMException) {
+                        console.log(`No tile icon found for "${base}"`);
+                    } else throw e;
+                })
+            );
         }
     }
+    
     return Promise.all(iconPromises);
 }
 
@@ -227,49 +223,147 @@ async function drawPortals(canvas, plane, portals, tileinfo) {
         await icons.portal.decode();
     }
     
-    const drawPortal = (x,y, x0,y0) => {
-        // APPROACH 1
-        // drawCtx.drawImage(icons.portal, 0, 13, 46, 46, (x-x0)*24, (y-y0)*24, 23, 23);
-        
-        // APPROACH 2
+    const portalColors = {
+        'Planar':      'DimGrey',
+        'QW':          'SpringGreen',
+        'Demon':       'Crimson',
+        'Transcended': 'Gold',
+        'Angel':       'Cyan',
+        'Interplanar': 'RebeccaPurple',
+    };
+    const portalColor = (portal) => {
+        if (!portal.alignment in portalColors) return 'white';
+        return portalColors[portal.alignment];
+    }
+    const drawPortal = (x,y, x0,y0, color) => {
         drawCtx.beginPath();
         
         drawCtx.rect((x-x0)*24+1, (y-y0)*24+1, 21, 21);
-        drawCtx.strokeStyle = 'blue';
+        drawCtx.strokeStyle = color;
         drawCtx.lineWidth = 2;
         drawCtx.stroke();
         
         drawCtx.closePath();
     };
     
+    const portalIndices = {
+        'Planar': 1, 'QW': 2, 'Evil': 3, 'Unaligned': 4, 'Good': 5, 'Interplanar': -6,
+    };
+    const portalIndex = (portal) => {
+        if (!portal.alignment in portalIndices) return 0;
+        return portalIndices[portal.alignment];
+    }
+    portals.sort((a,b) => portalIndex(a) - portalIndex(b));
     for (const portal of portals) {
         const [x0, y0] = [plane.x_offset, plane.y_offset];
+        if (!portal.alignment) {
+            if (portal.from.plane === portal.to.plane) portal.alignment = 'Planar';
+            else if (
+                [portal.from.plane, portal.to.plane].includes('Purgatorio') &&
+                [portal.from.plane, portal.to.plane].includes('Purgatorio Underground')
+            ) portal.alignment = 'Planar';
+            else if (
+                [portal.from.plane, portal.to.plane].includes('Cordillera') &&
+                [portal.from.plane, portal.to.plane].includes('Centrum')
+            ) portal.alignment = 'Planar';
+            else portal.alignment = 'Interplanar';
+        }
         if (portal.from.plane === plane.name) {
             const [x, y] = [portal.from.x, portal.from.y];
-            drawPortal(x,y, x0,y0);
+            drawPortal(x,y, x0,y0, portalColor(portal));
             if (!tileinfo[`${x}_${y}`]) tileinfo[`${x}_${y}`] = [];
             tileinfo[`${x}_${y}`].push({type: 'portal', to: portal.to, from: portal.from})
         }
+        if (portal.from.plane === 'PurgatorioUG' && plane.name === 'Purgatorio' && portal.to.plane != 'Purgatorio') {
+            const [x, y] = [portal.from.x, portal.from.y];
+            drawPortal(x,y, x0,y0, portalColor(portal));
+            if (!tileinfo[`${x}_${y}`]) tileinfo[`${x}_${y}`] = [];
+            tileinfo[`${x}_${y}`].push({type: 'portal', to: portal.to, from: portal.from})
+        }
+        /*
         if (portal.bidirectional && portal.to.plane === plane.name) {
             const [x, y] = [portal.to.x, portal.to.y];
-            drawPortal(x,y, x0,y0);
+            drawPortal(x,y, x0,y0, portalColor(portal));
             if (!tileinfo[`${x}_${y}`]) tileinfo[`${x}_${y}`] = [];
             tileinfo[`${x}_${y}`].push({type: 'portal', to: portal.from, from: portal.to});
         }
+        if (portal.bidirectional && portal.to.plane === 'PurgatorioUG' && plane.name === 'Purgatorio' && portal.from.plane != 'Purgatorio') {
+            const [x, y] = [portal.to.x, portal.to.y];
+            drawPortal(x,y, x0,y0, portalColor(portal));
+            if (!tileinfo[`${x}_${y}`]) tileinfo[`${x}_${y}`] = [];
+            tileinfo[`${x}_${y}`].push({type: 'portal', to: portal.from, from: portal.to});
+        }
+        */
     }
 }
 
 async function getMapDataURL(tiledata, planeID) {
+    const TBset = new Set();
     await d3.csv(
-        `https://cors-anywhere.argavyon.workers.dev/?https://www.nexusclash.com/js/${planeID}.csv`,
+        `https://www.nexusclash.com/js/${planeID}.csv`,
         function (d) {
             tiledata[parseInt(d.coord_enc)] = {
                 tilename: d.tilename,
                 tilebase: d.tile_base,
                 tilecolor: d.tilecolor
             };
+            if (!TBset.has(d.tile_base)) {
+                TBset.add(d.tile_base);
+            }
         }
     );
+    return TBset;
+}
+
+function updateTooltip(mousemove, planes, tiledata) {
+    const X = Math.floor((mousemove.offsetX) / 24) + planes[window.cur_plane].x_offset;
+    const Y = Math.floor((mousemove.offsetY) / 24) + planes[window.cur_plane].y_offset;
+    // console.log(X, Y, window.cur_plane);
+    const tooltip = document.querySelector('div#tooltip');
+    const TCS = window.getComputedStyle(tooltip);
+    const toolHalfHeight = Math.ceil(parseFloat(TCS['marginTop']) + parseFloat(TCS['marginBottom']) + tooltip.offsetHeight) / 2;
+    const loc = X + Y*72 + window.cur_plane*3600;
+    // console.log(loc);
+    
+    const concatNonEmptyWithSpaces = (...strings) => {
+        let result = '';
+        for (const str of strings) result += (result && str) ? (' ' + str) : str;
+        return result;
+    }
+    
+    if (tiledata[loc]) {
+        tooltip.innerHTML = '';
+        tooltip.style.left = `${Math.floor(mousemove.pageX) + 12}px`;
+        tooltip.style.top = `${Math.floor(mousemove.pageY - toolHalfHeight) - 12}px`;
+        tooltip.style.display = 'block';
+        
+        const tile = tiledata[loc];
+        const article = (word) => ['a', 'e', 'i', 'o', 'u'].includes(word[0].toLowerCase()) ? 'an' : 'a';
+        const descDiv = tooltip.appendChild(document.createElement('div'));
+        descDiv.textContent = `(${X}, ${Y}) ${tile.tilename}, ${article(tile.tilebase)} ${tile.tilebase}`;
+        
+        const tileContentDiv = tooltip.appendChild(document.createElement('div'));
+        tileContentDiv.style.marginLeft = '10px';
+        
+        if (tileinfo[`${X}_${Y}`]) {
+            for (const info of tileinfo[`${X}_${Y}`]) {
+                const infoDiv = tileContentDiv.appendChild(document.createElement('div'));
+                switch (info.type) {
+                case 'portal':
+                    const fromPlane = (info.from.plane === 'PurgatorioUG') ? '' : `${info.from.plane}`;
+                    const toPlane = (info.to.plane === 'PurgatorioUG') ? 'Underground' : `${info.to.plane}`;
+                    
+                    const fromSide = (info.from.plane === 'PurgatorioUG') ? ((planes[window.cur_plane].name !== 'PurgatorioUG') ? 'Underground' : '') : `${info.from.side}`.toLowerCase();
+                    const toSide = (info.to.plane === 'PurgatorioUG') ? '' : `${info.to.side}`.toLowerCase();
+                    
+                    // infoDiv.textContent = `Portal (${info.from.side}) to ${info.to.plane} ${info.to.x},${info.to.y} (${info.to.side}).`;
+                    infoDiv.textContent = concatNonEmptyWithSpaces(fromSide, 'portal', 'to', toPlane, toSide, `${info.to.x},${info.to.y}`);
+                    infoDiv.textContent = infoDiv.textContent[0].toUpperCase() + infoDiv.textContent.slice(1);
+                    break;
+                }
+            }
+        }
+    } else { tooltip.style.display = 'none'; }
 }
 
 function main() {
@@ -286,60 +380,32 @@ function main() {
     window.tiledata = {};
     window.tileinfo = [];
     window.cur_plane = null;
-    const iconsPromise = loadIcons(planes, tileinfo);
+    const iconsPromise = loadAllIcons(planes, tileinfo);
+    const portalsPromise = fetch('https://www.nexusclash.com/js/portals.json').then(resp => resp.json());
+    window.portals = {};
     document.querySelectorAll('li.nav-item button').forEach(btn => {
 		btn.onclick = async function() {
             window.cur_plane = this.value;
             window.tileinfo = {};
             window.tiledata = {};
             drawBaseMap(canvas, planes[window.cur_plane]);
+            let TBset = new Set();
             try {
-                await getMapDataURL(tiledata, window.cur_plane);
+                TBset = await getMapDataURL(tiledata, window.cur_plane);
             } catch (e) {
                 if (e.name === 'Error' && e.message === '526 ') {
                     console.log(`Cloudflare error 526 while retrieving data for ${planes[window.cur_plane].name}.`);
                 } else throw e;
             }
+            // const iconsPromise = loadTBsetIcons(TBset);
+            window.portals = await portalsPromise;
             drawMap(canvas, planes[window.cur_plane], tiledata, tileinfo);
-            await drawPortals(canvas, planes[window.cur_plane], portals, tileinfo);
+            await drawPortals(canvas, planes[window.cur_plane], window.portals, tileinfo);
             await drawIcons(canvas, planes[window.cur_plane], tiledata, tileinfo, iconsPromise);
-            await drawPortals(canvas, planes[window.cur_plane], portals, {});
+            await drawPortals(canvas, planes[window.cur_plane], window.portals, {});
         };
         
-        // console.log(tiledata);
-        canvas.onmousemove = function (e) {
-            const X = Math.floor((e.offsetX) / 24) + planes[window.cur_plane].x_offset;
-            const Y = Math.floor((e.offsetY) / 24) + planes[window.cur_plane].y_offset;
-            // console.log(X, Y, window.cur_plane);
-            const tooltip = document.querySelector('div#tooltip');
-            const TCS = window.getComputedStyle(tooltip);
-            const toolHalfHeight = Math.ceil(parseFloat(TCS['marginTop']) + parseFloat(TCS['marginBottom']) + tooltip.offsetHeight) / 2;
-            const loc = X + Y*72 + window.cur_plane*3600;
-            // console.log(loc);
-            
-            if (tiledata[loc]) {
-                tooltip.innerHTML = '';
-                tooltip.style.left = `${Math.floor(e.pageX) + 12}px`;
-                tooltip.style.top = `${Math.floor(e.pageY - toolHalfHeight) - 12}px`;
-                tooltip.style.display = 'block';
-                
-                const tile = tiledata[loc];
-                const article = (word) => ['a', 'e', 'i', 'o', 'u'].includes(word[0].toLowerCase()) ? 'an' : 'a';
-                const descDiv = tooltip.appendChild(document.createElement('div'));
-                descDiv.textContent = `(${X}, ${Y}) ${tile.tilename}, ${article(tile.tilebase)} ${tile.tilebase}`;
-                
-                if (tileinfo[`${X}_${Y}`]) {
-                    for (const info of tileinfo[`${X}_${Y}`]) {
-                        const infoDiv = tooltip.appendChild(document.createElement('div'));
-                        switch (info.type) {
-                        case 'portal':
-                            infoDiv.textContent = `Portal (${info.from.side}) to ${info.to.plane} ${info.to.x},${info.to.y} (${info.to.side}).`;
-                            break;
-                        }
-                    }
-                }
-            } else { tooltip.style.display = 'none'; }
-        }
+        canvas.onmousemove = function (e) { updateTooltip(e, planes, tiledata) };
         
         // DownloadCanvasAsImage(canvas);
 	});
